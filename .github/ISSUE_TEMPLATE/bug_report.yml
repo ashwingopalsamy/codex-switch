@@ -1,0 +1,88 @@
+name: Bug report
+description: Report a reproducible CodexSwitch failure or regression.
+title: "[Bug]: "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this form for a reproducible failure. For a suspected security issue, use SECURITY.md privately.
+  - type: input
+    id: macos-version
+    attributes:
+      label: macOS version
+      description: Include the macOS version and architecture.
+      placeholder: macOS 14.x, Apple Silicon
+    validations:
+      required: true
+  - type: input
+    id: chatgpt-version
+    attributes:
+      label: ChatGPT version
+      description: Copy the installed version only; do not include account details.
+      placeholder: 26.x
+    validations:
+      required: true
+  - type: input
+    id: codexswitch-build
+    attributes:
+      label: CodexSwitch commit or build
+      description: Use a commit SHA or local build identifier.
+      placeholder: 05a7de8 or local build
+    validations:
+      required: true
+  - type: dropdown
+    id: operation
+    attributes:
+      label: Operation
+      options:
+        - Authentication
+        - Guided validation
+        - Profile switch
+        - Live-conversation handoff
+        - Recovery
+        - Packaging or launch
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction steps
+      description: Give the smallest numbered sequence that reproduces the issue.
+      placeholder: |
+        1. Start with...
+        2. Choose...
+        3. Observe...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+    validations:
+      required: true
+  - type: textarea
+    id: sanitized-output
+    attributes:
+      label: Sanitized diagnostics
+      description: Include fixed-category output only. Remove paths, URLs, tokens, cookies, identity hashes, emails, private conversations, and unsanitized logs.
+      render: text
+    validations:
+      required: true
+  - type: checkboxes
+    id: privacy
+    attributes:
+      label: Privacy confirmation
+      options:
+        - label: I removed credentials, authentication material, account identifiers, private conversations, and personal paths.
+          required: true
+        - label: This report does not disclose a vulnerability that should be sent privately.
+          required: true
