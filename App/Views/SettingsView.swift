@@ -7,7 +7,6 @@ struct SettingsView: View {
     @State private var profilePendingRemoval: CodexProfile?
     @State private var isRemovalConfirmationPresented = false
     @State private var isLiveSessionHandoffConfirmationPresented = false
-    @State private var isCompatibilityConfirmationPresented = false
     @State private var isFAQPresented = false
 
     init(model: AppModel) {
@@ -15,25 +14,7 @@ struct SettingsView: View {
     }
 
     var body: some View {
-        compatibilityAlert
-    }
-
-    private var compatibilityAlert: some View {
         liveSessionAlert
-            .alert(
-                "Allow provisional compatibility?",
-                isPresented: $isCompatibilityConfirmationPresented,
-                presenting: model.pendingCompatibilityAcknowledgement
-            ) { _ in
-                Button("Allow for This Version") {
-                    model.confirmProvisionalCompatibility()
-                }
-                Button("Cancel", role: .cancel) {
-                    model.cancelProvisionalCompatibility()
-                }
-            } message: { pending in
-                Text("ChatGPT \(pending.appVersion) has not completed the optional guided diagnostics. CodexSwitch will still verify account identity and exact profile roots, then roll back if the requested launch cannot be confirmed. Continue to \(pending.action.description)?")
-            }
     }
 
     private var liveSessionAlert: some View {
@@ -122,7 +103,6 @@ struct SettingsView: View {
         .onAppear {
             UserDefaults.standard.set(ProcessInfo.processInfo.processIdentifier, forKey: "CodexSwitchManagementWindowPID")
             isLiveSessionHandoffConfirmationPresented = model.pendingLiveSessionHandoff != nil
-            isCompatibilityConfirmationPresented = model.pendingCompatibilityAcknowledgement != nil
         }
         .onChange(of: model.pendingLiveSessionHandoff?.id) { _, pendingID in
             isLiveSessionHandoffConfirmationPresented = pendingID != nil
@@ -130,14 +110,6 @@ struct SettingsView: View {
         .onChange(of: isLiveSessionHandoffConfirmationPresented) { _, isPresented in
             if !isPresented, model.pendingLiveSessionHandoff != nil {
                 model.cancelLiveSessionHandoff()
-            }
-        }
-        .onChange(of: model.pendingCompatibilityAcknowledgement?.id) { _, pendingID in
-            isCompatibilityConfirmationPresented = pendingID != nil
-        }
-        .onChange(of: isCompatibilityConfirmationPresented) { _, isPresented in
-            if !isPresented, model.pendingCompatibilityAcknowledgement != nil {
-                model.cancelProvisionalCompatibility()
             }
         }
         .task {

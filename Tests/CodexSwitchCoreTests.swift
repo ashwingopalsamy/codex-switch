@@ -297,14 +297,14 @@ final class CodexSwitchCoreTests: XCTestCase {
         XCTAssertFalse(migrated.contains("\"unverified\""))
     }
 
-    func testCompatibilityPolicyRequiresOneProvisionalAcknowledgement() {
+    func testCompatibilityPolicyAllowsProvisionalDirectly() {
         let policy = CompatibilityPolicy()
         let provisional = CompatibilityRecord(
             appVersion: "fixture",
             bundleIdentifier: "com.openai.codex",
             teamIdentifier: "team"
         )
-        XCTAssertEqual(policy.decision(for: provisional), .requiresAcknowledgement)
+        XCTAssertEqual(policy.decision(for: provisional), .allowed)
         XCTAssertTrue(policy.canSelectProfile(with: provisional))
 
         let date = Date(timeIntervalSince1970: 123)
@@ -938,6 +938,20 @@ final class CodexSwitchCoreTests: XCTestCase {
         )
         XCTAssertEqual(conflicting.cacheEvidence(for: adopted), .missing)
         XCTAssertFalse(conflicting.exposes(profile: adopted))
+
+        let fullyImplicit = ChatGPTProcessSnapshot(
+            mainPID: 42,
+            accountBearingPIDs: [42],
+            commandLines: [],
+            userDataRoots: [],
+            cacheRoots: [],
+            codexHomeRoots: [],
+            mainArgumentsReadable: true,
+            mainHasExplicitCacheOverride: false
+        )
+        XCTAssertEqual(fullyImplicit.cacheEvidence(for: adopted), .implicitAdoptedDefault)
+        XCTAssertTrue(fullyImplicit.exposes(profile: adopted))
+        XCTAssertFalse(fullyImplicit.exposes(profile: managed))
     }
 
     func testFailedTargetConfirmationRollsBackAndClearsJournal() async throws {
@@ -969,7 +983,7 @@ final class CodexSwitchCoreTests: XCTestCase {
         XCTAssertTrue(try XCTUnwrap(process.snapshot).exposes(profile: fixture.source))
     }
 
-    func testProvisionalSwitchRequiresAcknowledgementBeforeMutation() async throws {
+    func testProvisionalSwitchCommitsNormallyWithoutAcknowledgement() async throws {
         let fixture = try makeSwitchFixture()
         defer { try? FileManager.default.removeItem(at: fixture.root) }
         let app = fixtureChatGPTApplication()
@@ -977,69 +991,6 @@ final class CodexSwitchCoreTests: XCTestCase {
             appVersion: app.version,
             bundleIdentifier: app.bundleIdentifier,
             teamIdentifier: app.teamIdentifier
-        ))
-        let process = FakeChatGPTProcessController(snapshot: fixtureProcessSnapshot(profile: fixture.source))
-        let transaction = SwitchTransaction(
-            store: fixture.store,
-            processController: process,
-            verifier: FakeAccountVerifier(),
-            probe: FakeCompatibilityProbe(managedRoot: fixture.root)
-        )
-
-        do {
-            _ = try await transaction.switchTo(fixture.target.id)
-            XCTFail("Expected provisional acknowledgement to be required")
-        } catch let error as ProfileError {
-            guard case .compatibilityAcknowledgementRequired = error else {
-                return XCTFail("Expected compatibilityAcknowledgementRequired, got \(error)")
-            }
-        }
-
-        XCTAssertEqual(process.events, ["inspect"])
-        XCTAssertNil(try RecoveryJournal(url: fixture.store.journalURL).load())
-        XCTAssertEqual(try fixture.store.load().lastCommittedProfileID, fixture.source.id)
-    }
-
-    func testGuidedDiagnosticsCannotBypassProvisionalAcknowledgement() async throws {
-        let fixture = try makeSwitchFixture()
-        defer { try? FileManager.default.removeItem(at: fixture.root) }
-        let app = fixtureChatGPTApplication()
-        _ = try fixture.store.setCompatibility(CompatibilityRecord(
-            appVersion: app.version,
-            bundleIdentifier: app.bundleIdentifier,
-            teamIdentifier: app.teamIdentifier
-        ))
-        let process = FakeChatGPTProcessController(snapshot: fixtureProcessSnapshot(profile: fixture.source))
-        let transaction = SwitchTransaction(
-            store: fixture.store,
-            processController: process,
-            verifier: FakeAccountVerifier(),
-            probe: FakeCompatibilityProbe(managedRoot: fixture.root)
-        )
-
-        do {
-            _ = try await transaction.switchTo(
-                fixture.target.id,
-                validation: fixtureValidationAuthorization(fixture)
-            )
-            XCTFail("Expected diagnostics not to bypass acknowledgement")
-        } catch let error as ProfileError {
-            guard case .compatibilityAcknowledgementRequired = error else {
-                return XCTFail("Expected compatibilityAcknowledgementRequired, got \(error)")
-            }
-        }
-        XCTAssertNil(try RecoveryJournal(url: fixture.store.journalURL).load())
-    }
-
-    func testAcknowledgedProvisionalSwitchCommitsNormally() async throws {
-        let fixture = try makeSwitchFixture()
-        defer { try? FileManager.default.removeItem(at: fixture.root) }
-        let app = fixtureChatGPTApplication()
-        _ = try fixture.store.setCompatibility(CompatibilityRecord(
-            appVersion: app.version,
-            bundleIdentifier: app.bundleIdentifier,
-            teamIdentifier: app.teamIdentifier,
-            provisionalAcknowledgedAt: Date(timeIntervalSince1970: 123)
         ))
         let process = FakeChatGPTProcessController(snapshot: fixtureProcessSnapshot(profile: fixture.source))
         let transaction = SwitchTransaction(
@@ -1050,10 +1001,34 @@ final class CodexSwitchCoreTests: XCTestCase {
         )
 
         let outcome = try await transaction.switchTo(fixture.target.id)
-
         XCTAssertEqual(outcome, .committed)
         XCTAssertEqual(try fixture.store.load().lastCommittedProfileID, fixture.target.id)
         XCTAssertTrue(try XCTUnwrap(process.snapshot).exposes(profile: fixture.target))
+        XCTAssertNil(try RecoveryJournal(url: fixture.store.journalURL).load())
+    }
+
+    func testGuidedDiagnosticsSucceedsWithProvisionalCompatibility() async throws {
+        let fixture = try makeSwitchFixture()
+        defer { try? FileManager.default.removeItem(at: fixture.root) }
+        let app = fixtureChatGPTApplication()
+        _ = try fixture.store.setCompatibility(CompatibilityRecord(
+            appVersion: app.version,
+            bundleIdentifier: app.bundleIdentifier,
+            teamIdentifier: app.teamIdentifier
+        ))
+        let process = FakeChatGPTProcessController(snapshot: fixtureProcessSnapshot(profile: fixture.source))
+        let transaction = SwitchTransaction(
+            store: fixture.store,
+            processController: process,
+            verifier: FakeAccountVerifier(),
+            probe: FakeCompatibilityProbe(managedRoot: fixture.root)
+        )
+
+        let outcome = try await transaction.switchTo(
+            fixture.target.id,
+            validation: fixtureValidationAuthorization(fixture)
+        )
+        XCTAssertEqual(outcome, .committed)
         XCTAssertNil(try RecoveryJournal(url: fixture.store.journalURL).load())
     }
 
@@ -1479,6 +1454,8 @@ final class CodexSwitchCoreTests: XCTestCase {
 
         XCTAssertEqual(outcome, .unchanged)
         XCTAssertEqual(process.events, ["inspect"])
+        XCTAssertEqual(try fixture.store.load().lastCommittedProfileID, fixture.source.id)
+        XCTAssertEqual(try fixture.store.load().activeProfileID, fixture.source.id)
         XCTAssertNil(try RecoveryJournal(url: fixture.store.journalURL).load())
     }
 

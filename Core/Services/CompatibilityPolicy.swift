@@ -11,10 +11,8 @@ public struct CompatibilityPolicy: Sendable {
 
     public func decision(for record: CompatibilityRecord) -> CompatibilityDecision {
         switch record.status {
-        case .verified:
+        case .verified, .provisional:
             return .allowed
-        case .provisional:
-            return record.provisionalAcknowledgedAt == nil ? .requiresAcknowledgement : .allowed
         case .blocked:
             return .blocked(record.summary ?? "Profile switching is blocked for this ChatGPT version.")
         }

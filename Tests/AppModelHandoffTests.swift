@@ -6,7 +6,7 @@ import XCTest
 
 @MainActor
 final class AppModelHandoffTests: XCTestCase {
-    func testProvisionalAcknowledgementCancelsCleanlyThenPersistsAndContinuesSwitch() async throws {
+    func testProvisionalCompatibilitySwitchesDirectlyWithoutAcknowledgementModal() async throws {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("CodexSwitchAppModelCompatibilityTests-\(UUID().uuidString)", isDirectory: true)
         defer { try? FileManager.default.removeItem(at: root) }
@@ -34,32 +34,21 @@ final class AppModelHandoffTests: XCTestCase {
         let model = AppModel(
             store: store,
             transaction: transaction,
+            processController: process,
             locateApplication: { application },
             presentManagementWindow: { presentationCount += 1 }
         )
         model.document = try store.load()
 
         model.switchTo(target)
-        XCTAssertNotNil(model.pendingCompatibilityAcknowledgement)
-        XCTAssertEqual(process.events, [])
-        model.cancelProvisionalCompatibility()
-        XCTAssertNil(model.pendingCompatibilityAcknowledgement)
-        XCTAssertNil(try store.compatibility(for: application).provisionalAcknowledgedAt)
-        XCTAssertEqual(try store.load().lastCommittedProfileID, source.id)
-
-        model.switchTo(target)
-        XCTAssertNotNil(model.pendingCompatibilityAcknowledgement)
-        model.confirmProvisionalCompatibility()
         let switchCommitted = await waitUntil {
             !model.isWorking && model.activeProfileID == target.id
         }
 
         XCTAssertTrue(switchCommitted)
-        XCTAssertNil(model.pendingCompatibilityAcknowledgement)
-        XCTAssertNotNil(try store.compatibility(for: application).provisionalAcknowledgedAt)
         XCTAssertEqual(process.events.filter { $0 == "quit" }.count, 1)
         XCTAssertEqual(process.events.filter { $0 == "launch:\(target.id.uuidString)" }.count, 1)
-        XCTAssertEqual(presentationCount, 2)
+        XCTAssertEqual(presentationCount, 0)
     }
 
     func testCancellationAndRepeatedConfirmationPreserveHistoryAndRunOneTransaction() async throws {
@@ -156,6 +145,46 @@ final class AppModelHandoffTests: XCTestCase {
         XCTAssertEqual(model.validationHistory, originalHistory + [target.id])
         XCTAssertFalse(model.hasPendingLiveSessionHandoff)
         XCTAssertEqual(presentationCount, 2)
+    }
+
+    func testAppModelInfersActiveProfileFromRunningProcessSnapshot() async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("CodexSwitchAppModelInferenceTests-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = ProfileStore(root: root)
+        _ = try store.ensureAdoptedDefaultProfile(named: "Adopted Primary")
+        let primary = try store.load().profiles.first(where: { $0.storageKind == .adoptedDefault })!
+        var secondary = try store.createManagedProfile(named: "Secondary Work").1
+        secondary.expectedIdentityHash = "sec-hash"
+        _ = try store.update(secondary)
+        _ = try store.setActive(secondary.id, committed: true)
+
+        let application = appModelFixtureApplication()
+        let process = AppModelProcessController(
+            snapshot: appModelSnapshot(profile: primary),
+            onQuit: {}
+        )
+        let transaction = SwitchTransaction(
+            store: store,
+            processController: process,
+            verifier: AppModelAccountVerifier(),
+            probe: AppModelCompatibilityProbe(application: application)
+        )
+        let model = AppModel(
+            store: store,
+            transaction: transaction,
+            processController: process,
+            locateApplication: { application }
+        )
+        model.document = try store.load()
+        XCTAssertEqual(model.activeProfileID, secondary.id)
+
+        model.isChatGPTRunning = true
+        model.inferRunningProfile()
+
+        XCTAssertEqual(model.activeProfileID, primary.id)
+        XCTAssertEqual(model.activeProfile?.id, primary.id)
+        XCTAssertEqual(try store.load().lastCommittedProfileID, primary.id)
     }
 
     private func waitUntil(

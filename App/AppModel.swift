@@ -23,25 +23,12 @@ enum PendingCompatibilityAction: Equatable {
     }
 }
 
-struct PendingCompatibilityAcknowledgement: Identifiable, Equatable {
-    let id = UUID()
-    let action: PendingCompatibilityAction
-    let appVersion: String
-    let bundleIdentifier: String
-    let teamIdentifier: String
-
-    func matches(_ app: ChatGPTApplication) -> Bool {
-        app.version == appVersion &&
-            app.bundleIdentifier == bundleIdentifier &&
-            app.teamIdentifier == teamIdentifier
-    }
-}
-
 @MainActor
 @Observable
 final class AppModel {
     let store: ProfileStore
     private let transaction: SwitchTransaction
+    private let processController: any ChatGPTProcessControlling
     private let verifier: AccountVerifier
     private let locateApplication: @Sendable () throws -> ChatGPTApplication
     private let configManager: CodexConfigManager
@@ -69,7 +56,6 @@ final class AppModel {
     var isCompatibilitySelectable = true
     var validationHistory: [UUID] = []
     var pendingLiveSessionHandoff: PendingLiveSessionHandoff?
-    var pendingCompatibilityAcknowledgement: PendingCompatibilityAcknowledgement?
 
     @ObservationIgnored private var operationTask: Task<Void, Never>?
     private var validationAuthorization: GuidedValidationAuthorization?
@@ -79,6 +65,7 @@ final class AppModel {
     init(
         store: ProfileStore = ProfileStore(),
         transaction: SwitchTransaction? = nil,
+        processController: (any ChatGPTProcessControlling)? = nil,
         compatibilityPolicy: CompatibilityPolicy = CompatibilityPolicy(),
         locateApplication: @escaping @Sendable () throws -> ChatGPTApplication = {
             try ChatGPTLocator().locate()
@@ -92,7 +79,14 @@ final class AppModel {
         self.locateApplication = locateApplication
         configManager = CodexConfigManager()
         self.compatibilityPolicy = compatibilityPolicy
-        self.transaction = transaction ?? SwitchTransaction(store: store)
+        let controller = processController ?? CodexProcessController()
+        self.processController = controller
+        self.transaction = transaction ?? SwitchTransaction(
+            store: store,
+            processController: controller,
+            verifier: verifier,
+            compatibilityPolicy: compatibilityPolicy
+        )
         self.presentManagementWindow = presentManagementWindow
         authentication = AuthenticationCoordinator(browserOpener: { url in
             NSWorkspace.shared.open(url)
@@ -137,6 +131,26 @@ final class AppModel {
                 self?.updateProcessRunningState()
             }
         }
+
+        NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.didActivateApplicationNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                self?.updateProcessRunningState()
+            }
+        }
+
+        NotificationCenter.default.addObserver(
+            forName: NSApplication.didBecomeActiveNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                self?.updateProcessRunningState()
+            }
+        }
     }
 
     func updateProcessRunningState() {
@@ -144,7 +158,27 @@ final class AppModel {
             isChatGPTRunning = false
             return
         }
-        isChatGPTRunning = !NSRunningApplication.runningApplications(withBundleIdentifier: app.bundleIdentifier).isEmpty
+        let runningApps = NSRunningApplication.runningApplications(withBundleIdentifier: app.bundleIdentifier)
+        isChatGPTRunning = !runningApps.isEmpty
+        if isChatGPTRunning {
+            inferRunningProfile()
+        }
+    }
+
+    func inferRunningProfile() {
+        guard isChatGPTRunning else { return }
+        guard let snapshot = try? processController.inspectSession() else { return }
+        let candidates = document.profiles.filter { snapshot.exposes(profile: $0) }
+        guard candidates.count == 1 else { return }
+        let running = candidates[0]
+        if document.lastCommittedProfileID != running.id || document.activeProfileID != running.id {
+            document.lastCommittedProfileID = running.id
+            document.activeProfileID = running.id
+            _ = try? store.setActive(running.id, committed: true)
+            if !isWorking, recoveryMessage == nil {
+                statusMessage = "Active: \(running.displayName)"
+            }
+        }
     }
 
     var activeProfile: CodexProfile? {
@@ -169,7 +203,7 @@ final class AppModel {
     }
 
     var hasPendingSwitchConfirmation: Bool {
-        pendingLiveSessionHandoff != nil || pendingCompatibilityAcknowledgement != nil
+        pendingLiveSessionHandoff != nil
     }
 
     func isReady(_ profile: CodexProfile) -> Bool {
@@ -195,45 +229,6 @@ final class AppModel {
     func switchTo(_ profile: CodexProfile) {
         guard !hasPendingSwitchConfirmation else { return }
         requestCompatibility(for: .switchProfile(id: profile.id, displayName: profile.displayName))
-    }
-
-    func confirmProvisionalCompatibility() {
-        guard !isWorking, let pendingCompatibilityAcknowledgement else { return }
-        do {
-            let app = try locateApplication()
-            guard pendingCompatibilityAcknowledgement.matches(app) else {
-                self.pendingCompatibilityAcknowledgement = nil
-                updateCompatibilityStatus()
-                lastError = "The installed ChatGPT version changed. Review provisional compatibility again."
-                statusMessage = "Compatibility changed"
-                return
-            }
-            let record = try store.compatibility(for: app)
-            let acknowledged = compatibilityPolicy.acknowledging(record)
-            guard compatibilityPolicy.decision(for: acknowledged) == .allowed else {
-                self.pendingCompatibilityAcknowledgement = nil
-                updateCompatibilityStatus()
-                lastError = "This ChatGPT version can no longer be acknowledged for provisional switching."
-                statusMessage = "Compatibility changed"
-                return
-            }
-            document = try store.setCompatibility(acknowledged)
-            self.pendingCompatibilityAcknowledgement = nil
-            updateCompatibilityStatus()
-            SwitchLogger.compatibility(.provisional)
-            perform(pendingCompatibilityAcknowledgement.action)
-        } catch {
-            self.pendingCompatibilityAcknowledgement = nil
-            lastError = error.localizedDescription
-            statusMessage = "Could not save compatibility choice"
-        }
-    }
-
-    func cancelProvisionalCompatibility() {
-        guard !isWorking else { return }
-        pendingCompatibilityAcknowledgement = nil
-        lastError = nil
-        statusMessage = activeProfile.map { "Active: \($0.displayName)" } ?? "Compatibility confirmation cancelled"
     }
 
     func confirmLiveSessionHandoff() {
@@ -343,18 +338,8 @@ final class AppModel {
             isProvisionalCompatibilityAcknowledged = record.provisionalAcknowledgedAt != nil
             isCompatibilitySelectable = compatibilityPolicy.canSelectProfile(with: record)
             switch compatibilityPolicy.decision(for: record) {
-            case .allowed:
+            case .allowed, .requiresAcknowledgement:
                 perform(action)
-            case .requiresAcknowledgement:
-                pendingCompatibilityAcknowledgement = PendingCompatibilityAcknowledgement(
-                    action: action,
-                    appVersion: app.version,
-                    bundleIdentifier: app.bundleIdentifier,
-                    teamIdentifier: app.teamIdentifier
-                )
-                statusMessage = "Compatibility confirmation required"
-                lastError = nil
-                presentManagementWindow()
             case .blocked(let message):
                 statusMessage = "ChatGPT version blocked"
                 lastError = message

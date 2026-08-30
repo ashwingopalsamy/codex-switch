@@ -52,9 +52,19 @@ public struct ChatGPTProcessSnapshot: Equatable, Sendable {
     }
 
     public func exposes(profile: CodexProfile) -> Bool {
-        return userDataRoots.contains(profile.electronDataURL.standardizedFileURL.path) &&
+        let matchesUserData = userDataRoots.contains(profile.electronDataURL.standardizedFileURL.path) ||
+            (profile.storageKind == .adoptedDefault &&
+             profile.electronDataURL.standardizedFileURL == CodexSwitchPaths.defaultElectronData.standardizedFileURL &&
+             mainArgumentsReadable &&
+             userDataRoots.isEmpty)
+        let matchesCodexHome = codexHomeRoots.contains(profile.codexHomeURL.standardizedFileURL.path) ||
+            (profile.storageKind == .adoptedDefault &&
+             profile.codexHomeURL.standardizedFileURL == CodexSwitchPaths.defaultCodexHome.standardizedFileURL &&
+             mainArgumentsReadable &&
+             codexHomeRoots.isEmpty)
+        return matchesUserData &&
             cacheEvidence(for: profile) != .missing &&
-            codexHomeRoots.contains(profile.codexHomeURL.standardizedFileURL.path)
+            matchesCodexHome
     }
 }
 
@@ -192,12 +202,25 @@ public final class DarwinProcessSnapshotProvider: @unchecked Sendable {
 
     public func process(_ pid: Int32, exposes profile: CodexProfile) -> Bool {
         guard let record = record(for: pid) else { return false }
+        guard record.argumentsReadable else { return false }
         let userRoots = Set(values(for: "--user-data-dir", in: record.arguments).map(normalizedPath))
         let cacheRoots = Set(values(for: "--disk-cache-dir", in: record.arguments).map(normalizedPath))
         let codexHomes = Set([record.codexHome].compactMap { $0 }.map(normalizedPath))
-        return userRoots.contains(profile.electronDataURL.standardizedFileURL.path) &&
-            cacheRoots.contains(profile.electronCacheURL.standardizedFileURL.path) &&
-            codexHomes.contains(profile.codexHomeURL.standardizedFileURL.path)
+
+        let matchesUserData = userRoots.contains(profile.electronDataURL.standardizedFileURL.path) ||
+            (profile.storageKind == .adoptedDefault &&
+             profile.electronDataURL.standardizedFileURL == CodexSwitchPaths.defaultElectronData.standardizedFileURL &&
+             userRoots.isEmpty)
+        let matchesCache = cacheRoots.contains(profile.electronCacheURL.standardizedFileURL.path) ||
+            (profile.storageKind == .adoptedDefault &&
+             profile.electronCacheURL.standardizedFileURL == CodexSwitchPaths.defaultElectronCache.standardizedFileURL &&
+             cacheRoots.isEmpty)
+        let matchesCodexHome = codexHomes.contains(profile.codexHomeURL.standardizedFileURL.path) ||
+            (profile.storageKind == .adoptedDefault &&
+             profile.codexHomeURL.standardizedFileURL == CodexSwitchPaths.defaultCodexHome.standardizedFileURL &&
+             codexHomes.isEmpty)
+
+        return matchesUserData && matchesCache && matchesCodexHome
     }
 
     private func processParentMap() -> [Int32: Int32] {

@@ -83,11 +83,6 @@ struct MenuBarView: View {
                 showManagementWindow()
             }
         }
-        .onChange(of: model.pendingCompatibilityAcknowledgement?.id) { _, pendingID in
-            if pendingID != nil {
-                showManagementWindow()
-            }
-        }
     }
 
     private var activeProfileHeader: String {

@@ -8,6 +8,7 @@ Use this page as the routing table. Read the smallest authoritative set that cov
 | Authentication, browser flow, identity binding, callback completion | [architecture.md](architecture.md) Authentication | Core/Services/AppServerClient.swift, Core/Models/Authentication.swift |
 | Guided validation or compatibility claim | [validation.md](validation.md) | [status.md](status.md), Core/Models/GuidedValidation.swift, Core/Services/CompatibilityProbe.swift |
 | SwiftUI lifecycle, menu bar, single window, packaging | [architecture.md](architecture.md) Application lifecycle | App/, Resources/Info.plist, script/build_and_run.sh |
+| Design system, tokens, and UI/UX tastes | [DESIGN.md](../DESIGN.md) | App/Views/Components/UITheme.swift, App/Views/ |
 | Domain terminology | [CONTEXT.md](../CONTEXT.md) | Existing model and service names |
 | Agent workflow and safety | [AGENTS.md](../AGENTS.md) | [agent-context.md](agent-context.md) |
 | Commands and evidence | [verification-matrix.md](verification-matrix.md) | Package.swift, script/build_and_run.sh, Probe/main.swift |

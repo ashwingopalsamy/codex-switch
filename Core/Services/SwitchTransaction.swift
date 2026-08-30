@@ -151,7 +151,10 @@ public final class SwitchTransaction: @unchecked Sendable {
                 )
             }
         }
-        guard source.id != target.id else { return .unchanged }
+        guard source.id != target.id else {
+            _ = try store.setActive(target.id, committed: true)
+            return .unchanged
+        }
 
         let app = try probe.app()
         let compatibility = try store.compatibility(for: app)
