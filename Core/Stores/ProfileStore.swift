@@ -15,10 +15,15 @@ public final class ProfileStore: @unchecked Sendable {
     }
 
     public var documentURL: URL { root.appendingPathComponent("profiles.json") }
-    public var profilesRoot: URL { root.appendingPathComponent("Profiles", isDirectory: true) }
+    public var profilesRoot: URL { root.appendingPathComponent("p", isDirectory: true) }
+    public var legacyProfilesRoot: URL { root.appendingPathComponent("Profiles", isDirectory: true) }
     public var journalURL: URL { root.appendingPathComponent("switch-transaction.json") }
     public var operationLockURL: URL { root.appendingPathComponent("switch-operation.lock") }
     public var configBackupsURL: URL { root.appendingPathComponent("Config Backups", isDirectory: true) }
+
+    public func managedProfileRoot(for id: UUID) -> URL {
+        profilesRoot.appendingPathComponent(compactDirectoryName(for: id), isDirectory: true)
+    }
 
     public func load() throws -> ProfileStoreDocument {
         try SecureFileSystem.rejectSymlink(documentURL, fileManager: fileManager)
@@ -64,7 +69,10 @@ public final class ProfileStore: @unchecked Sendable {
     public func createManagedProfile(named name: String) throws -> (ProfileStoreDocument, CodexProfile) {
         var document = try load()
         let id = UUID()
-        let profileRoot = profilesRoot.appendingPathComponent(id.uuidString, isDirectory: true)
+        let profileRoot = managedProfileRoot(for: id)
+        guard !fileManager.fileExists(atPath: profileRoot.path) else {
+            throw ProfileError.transactionFailed("A managed profile storage collision was detected.")
+        }
         let codexHome = profileRoot.appendingPathComponent("codex-home", isDirectory: true)
         let electronData = profileRoot.appendingPathComponent("electron-data", isDirectory: true)
         let electronCache = profileRoot.appendingPathComponent("electron-cache", isDirectory: true)
@@ -84,6 +92,59 @@ public final class ProfileStore: @unchecked Sendable {
         document.profiles.append(profile)
         try save(document)
         return (document, profile)
+    }
+
+    @discardableResult
+    public func compactManagedProfile(_ profileID: UUID) throws -> ProfileStoreDocument {
+        var document = try load()
+        guard let index = document.profiles.firstIndex(where: { $0.id == profileID }) else {
+            throw ProfileError.missingProfile
+        }
+        let profile = document.profiles[index]
+        guard profile.storageKind == .managed else { return document }
+
+        let currentRoot = profile.codexHomeURL.deletingLastPathComponent()
+        let targetRoot = managedProfileRoot(for: profile.id)
+        if currentRoot.standardizedFileURL == targetRoot.standardizedFileURL {
+            return document
+        }
+
+        try validate(profile)
+        try SecureFileSystem.createDirectory(profilesRoot, fileManager: fileManager)
+
+        let currentExists = fileManager.fileExists(atPath: currentRoot.path)
+        let targetExists = fileManager.fileExists(atPath: targetRoot.path)
+        if currentExists && targetExists {
+            throw ProfileError.transactionFailed("Both legacy and compact storage exist for a managed profile.")
+        }
+        guard currentExists || targetExists else {
+            throw ProfileError.transactionFailed("Managed profile storage is missing.")
+        }
+
+        var moved = false
+        if currentExists {
+            try SecureFileSystem.rejectSymlink(currentRoot, fileManager: fileManager)
+            try fileManager.moveItem(at: currentRoot, to: targetRoot)
+            moved = true
+        } else {
+            try SecureFileSystem.rejectSymlink(targetRoot, fileManager: fileManager)
+        }
+
+        var compacted = profile
+        compacted.codexHomePath = targetRoot.appendingPathComponent("codex-home", isDirectory: true).path
+        compacted.electronDataPath = targetRoot.appendingPathComponent("electron-data", isDirectory: true).path
+        compacted.electronCachePath = targetRoot.appendingPathComponent("electron-cache", isDirectory: true).path
+        do {
+            try validate(compacted)
+            document.profiles[index] = compacted
+            try save(document)
+        } catch {
+            if moved {
+                try? fileManager.moveItem(at: targetRoot, to: currentRoot)
+            }
+            throw error
+        }
+        return document
     }
 
     public func update(_ profile: CodexProfile) throws -> ProfileStoreDocument {
@@ -131,7 +192,11 @@ public final class ProfileStore: @unchecked Sendable {
 
         if profile.storageKind == .managed {
             let profileRoot = profile.codexHomeURL.deletingLastPathComponent()
-            guard SecureFileSystem.isPath(profileRoot, inside: profilesRoot),
+            let isCompactRoot = SecureFileSystem.isPath(profileRoot, inside: profilesRoot) &&
+                profileRoot.lastPathComponent == compactDirectoryName(for: profile.id)
+            let isLegacyRoot = SecureFileSystem.isPath(profileRoot, inside: legacyProfilesRoot) &&
+                profileRoot.lastPathComponent == profile.id.uuidString
+            guard isCompactRoot || isLegacyRoot,
                   profile.codexHomeURL.lastPathComponent == "codex-home",
                   profile.electronDataURL.lastPathComponent == "electron-data",
                   profile.electronCacheURL.lastPathComponent == "electron-cache",
@@ -144,6 +209,10 @@ public final class ProfileStore: @unchecked Sendable {
                 try SecureFileSystem.rejectSymlink(path, fileManager: fileManager)
             }
         }
+    }
+
+    private func compactDirectoryName(for id: UUID) -> String {
+        String(id.uuidString.replacingOccurrences(of: "-", with: "").prefix(12)).lowercased()
     }
 
     public func compatibility(for app: ChatGPTApplication) throws -> CompatibilityRecord {

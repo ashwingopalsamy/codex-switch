@@ -11,6 +11,10 @@ public enum CodexSwitchPaths {
     }
 
     public static var profiles: URL {
+        applicationSupport.appendingPathComponent("p", isDirectory: true)
+    }
+
+    public static var legacyProfiles: URL {
         applicationSupport.appendingPathComponent("Profiles", isDirectory: true)
     }
 

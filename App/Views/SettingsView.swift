@@ -4,13 +4,15 @@ import SwiftUI
 
 struct SettingsView: View {
     let model: AppModel
+    private let startsModelLifecycle: Bool
     @State private var profilePendingRemoval: CodexProfile?
     @State private var isRemovalConfirmationPresented = false
     @State private var isLiveSessionHandoffConfirmationPresented = false
     @State private var isFAQPresented = false
 
-    init(model: AppModel) {
+    init(model: AppModel, startsModelLifecycle: Bool = true) {
         self.model = model
+        self.startsModelLifecycle = startsModelLifecycle
     }
 
     var body: some View {
@@ -81,26 +83,29 @@ struct SettingsView: View {
         .frame(width: 480)
         .frame(minHeight: 380, maxHeight: 580)
         .background(VisualEffectBackground(material: .underWindowBackground, blendingMode: .behindWindow).ignoresSafeArea())
-        .background(
-            WindowAccessor { window in
-                window.isOpaque = false
-                window.backgroundColor = .clear
-                window.titleVisibility = .hidden
-                window.titlebarAppearsTransparent = true
-                window.titlebarSeparatorStyle = .none
-                window.styleMask.insert(.fullSizeContentView)
-                window.isMovableByWindowBackground = true
-                window.minSize = NSSize(width: 480, height: 380)
-                window.maxSize = NSSize(width: 480, height: 700)
-                if abs(window.frame.width - 480) > 1.0 {
-                    var frame = window.frame
-                    frame.origin.x += (frame.width - 480) / 2
-                    frame.size.width = 480
-                    window.setFrame(frame, display: true, animate: false)
+        .background {
+            if startsModelLifecycle {
+                WindowAccessor { window in
+                    window.isOpaque = false
+                    window.backgroundColor = .clear
+                    window.titleVisibility = .hidden
+                    window.titlebarAppearsTransparent = true
+                    window.titlebarSeparatorStyle = .none
+                    window.styleMask.insert(.fullSizeContentView)
+                    window.isMovableByWindowBackground = true
+                    window.minSize = NSSize(width: 480, height: 380)
+                    window.maxSize = NSSize(width: 480, height: 700)
+                    if abs(window.frame.width - 480) > 1.0 {
+                        var frame = window.frame
+                        frame.origin.x += (frame.width - 480) / 2
+                        frame.size.width = 480
+                        window.setFrame(frame, display: true, animate: false)
+                    }
                 }
             }
-        )
+        }
         .onAppear {
+            guard startsModelLifecycle else { return }
             UserDefaults.standard.set(ProcessInfo.processInfo.processIdentifier, forKey: "CodexSwitchManagementWindowPID")
             isLiveSessionHandoffConfirmationPresented = model.pendingLiveSessionHandoff != nil
         }
@@ -113,6 +118,7 @@ struct SettingsView: View {
             }
         }
         .task {
+            guard startsModelLifecycle else { return }
             ManagementWindowPresenter.presentExisting()
             model.start()
         }

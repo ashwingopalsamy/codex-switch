@@ -210,7 +210,7 @@ CodexSwitch provides a synchronized dual-surface user experience:
 ┌─────────────────────────────────────────────────────────────┐
 │                      macOS Menu Bar                         │
 │  [CodexSwitch 18×18 Icon]                                   │
-│  ├─ Active: Personal (user@example.com)                     │
+│  ├─ Active: Personal (synthetic-03@example.invalid)                     │
 │  ├─ Switch Profile ▶ [✓ Personal | Work (Cmd+2)]           │
 │  ├─ Open ChatGPT / ChatGPT (Running)                        │
 │  ├─ Manage Profiles… ──────────────────────────────────┐    │
@@ -226,11 +226,11 @@ CodexSwitch provides a synchronized dual-surface user experience:
 │  PROFILES [ 2 ]                                             │
 │  ┌───────────────────────────────────────────────────────┐  │
 │  │ (●) Personal                     [Finder][Re-auth]    │  │
-│  │     user@example.com             (● Active)           │  │
+│  │     synthetic-03@example.invalid             (● Active)           │  │
 │  └───────────────────────────────────────────────────────┘  │
 │  ┌───────────────────────────────────────────────────────┐  │
 │  │ ( ) Work                         [Finder][Re-auth][🗑] │  │
-│  │     work@company.com             [ Switch ]           │  │
+│  │     synthetic-07@example.invalid             [ Switch ]           │  │
 │  └───────────────────────────────────────────────────────┘  │
 │  ┌───────────────────────────────────────────────────────┐  │
 │  │ [+] New profile (e.g. Work, Research)             (+) │  │

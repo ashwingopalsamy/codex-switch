@@ -4,6 +4,18 @@ CodexSwitch is a local macOS 14+ utility for keeping independent Codex/ChatGPT d
 
 The utility launches the official ChatGPT application with profile-specific `CODEX_HOME`, Electron user-data, and cache roots. It does not parse OAuth material, proxy traffic, patch ChatGPT, or copy live account state.
 
+## Screenshots
+
+These screenshots use synthetic profile names and contain no account identity data.
+
+### Profile manager
+
+![CodexSwitch profile manager with synthetic Personal and Work profiles](screenshots/profile-manager.jpg)
+
+### Menu-bar actions
+
+![CodexSwitch menu-bar actions with a synthetic active profile](screenshots/menu-bar.jpg)
+
 ## Build and test
 
 ```bash

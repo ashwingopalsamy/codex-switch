@@ -23,7 +23,9 @@ Managed profiles live below:
 └── electron-cache/
 ```
 
-The profile document stores UUID, user label, paths, storage ownership, an identity hash, validation date, validated app version, and compatibility records. Legacy free-form validation messages are discarded during schema-v2 migration. Schema v3 maps legacy `unverified`/`supported`/`unsupported` records to `provisional`/`verified`/`blocked` and can store a provisional acknowledgement. Profile A’s paths are immutable; managed roots must be exact siblings below their UUID directory.
+New managed profiles use compact private roots below `~/Library/Application Support/CodexSwitch/p/<12-hex-id>/` with the same three sibling directories. The compact form is required because the official desktop app creates its local IPC socket at `$CODEX_HOME/ipc/ipc.sock`, and macOS rejects the legacy UUID path when that Unix-socket path exceeds its length limit. Legacy `Profiles/<UUID>` roots are accepted for loading and are moved to the compact root only when the profile is not running; switching compacts the target after the source has exited gracefully. The move preserves the profile contents and identity binding.
+
+The profile document stores UUID, user label, paths, storage ownership, an identity hash, validation date, validated app version, and compatibility records. Legacy free-form validation messages are discarded during schema-v2 migration. Schema v3 maps legacy `unverified`/`supported`/`unsupported` records to `provisional`/`verified`/`blocked` and can store a provisional acknowledgement. Profile A’s paths are immutable; managed roots must be exact siblings below their compact profile directory.
 
 Every existing path component is checked for symlinks and canonical containment before access. Profile-local `config.toml` is updated to top-level `cli_auth_credentials_store = "file"`; an existing file is backed up before modification.
 

@@ -42,18 +42,45 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 @main
 struct CodexSwitchApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
-    @State private var model = AppModel()
+    @State private var model: AppModel
+    private let usesScreenshotFixture: Bool
+    private let showsScreenshotMenu: Bool
+
+    @MainActor
+    init() {
+        #if DEBUG
+        let arguments = ProcessInfo.processInfo.arguments
+        let useFixture = arguments.contains("--screenshot-fixture") || arguments.contains("--screenshot-menu")
+        showsScreenshotMenu = arguments.contains("--screenshot-menu")
+        #else
+        let useFixture = false
+        showsScreenshotMenu = false
+        #endif
+        usesScreenshotFixture = useFixture
+        #if DEBUG
+        _model = State(initialValue: useFixture ? ScreenshotFixtures.model() : AppModel())
+        #else
+        _model = State(initialValue: AppModel())
+        #endif
+    }
 
     var body: some Scene {
         Window("CodexSwitch", id: "management") {
-            SettingsView(model: model)
+            if showsScreenshotMenu {
+                MenuBarView(model: model, recordsLifecycle: false)
+                    .frame(width: 320)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.vertical, 8)
+            } else {
+                SettingsView(model: model, startsModelLifecycle: !usesScreenshotFixture)
+            }
         }
         .windowStyle(.hiddenTitleBar)
         .defaultSize(width: 480, height: 440)
         .windowResizability(.contentSize)
 
         MenuBarExtra {
-            MenuBarView(model: model)
+            MenuBarView(model: model, recordsLifecycle: !usesScreenshotFixture)
         } label: {
             Label {
                 Text("CodexSwitch")

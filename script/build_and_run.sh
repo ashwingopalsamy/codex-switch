@@ -137,8 +137,8 @@ case "$MODE" in
     app_pid="$(pgrep -x "$APP_NAME")"
     [[ "$app_pid" =~ ^[0-9]+$ ]]
     lsappinfo_output="$(/usr/bin/lsappinfo info -only CFBundleIdentifier,ApplicationType,LSUIElement -app "$APP_NAME")"
-    grep -q 'CFBundleIdentifier.*in.ashwingopalsamy.codexswitch' <<< "$lsappinfo_output"
-    grep -q 'ApplicationType.*Foreground' <<< "$lsappinfo_output"
+    grep -Eq '(CFBundleIdentifier.*in\.ashwingopalsamy\.codexswitch|bundleID="in\.ashwingopalsamy\.codexswitch")' <<< "$lsappinfo_output"
+    grep -Eq '(ApplicationType.*Foreground|type="Foreground")' <<< "$lsappinfo_output"
     ! grep -q 'LSUIElement.*true' <<< "$lsappinfo_output"
     menubar_pid="$(/usr/bin/defaults read "$BUNDLE_ID" CodexSwitchMenuBarPID 2>/dev/null || true)"
     [[ "$menubar_pid" == "$app_pid" ]]

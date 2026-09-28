@@ -4,7 +4,13 @@ import SwiftUI
 
 struct MenuBarView: View {
     let model: AppModel
+    private let recordsLifecycle: Bool
     @Environment(\.openWindow) private var openWindow
+
+    init(model: AppModel, recordsLifecycle: Bool = true) {
+        self.model = model
+        self.recordsLifecycle = recordsLifecycle
+    }
 
     var body: some View {
         Group {
@@ -76,7 +82,9 @@ struct MenuBarView: View {
             }
         }
         .onAppear {
-            UserDefaults.standard.set(ProcessInfo.processInfo.processIdentifier, forKey: "CodexSwitchMenuBarPID")
+            if recordsLifecycle {
+                UserDefaults.standard.set(ProcessInfo.processInfo.processIdentifier, forKey: "CodexSwitchMenuBarPID")
+            }
         }
         .onChange(of: model.pendingLiveSessionHandoff?.id) { _, pendingID in
             if pendingID != nil {

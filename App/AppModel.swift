@@ -101,6 +101,14 @@ final class AppModel {
         updateProcessRunningState()
         do {
             document = try store.ensureAdoptedDefaultProfile()
+            if !isChatGPTRunning {
+                let managedProfileIDs = document.profiles
+                    .filter { $0.storageKind == .managed }
+                    .map(\.id)
+                for profileID in managedProfileIDs {
+                    document = try store.compactManagedProfile(profileID)
+                }
+            }
         } catch {
             lastError = error.localizedDescription
         }
@@ -606,9 +614,6 @@ final class AppModel {
             var updated = try store.load()
             let profileRoot = profile.codexHomeURL.deletingLastPathComponent()
             try store.validate(profile)
-            guard SecureFileSystem.isPath(profileRoot, inside: store.profilesRoot) else {
-                throw ProfileError.invalidPath(profileRoot.path)
-            }
             updated.profiles.removeAll { $0.id == profile.id }
             var trashedURL: NSURL?
             try FileManager.default.trashItem(at: profileRoot, resultingItemURL: &trashedURL)

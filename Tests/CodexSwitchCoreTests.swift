@@ -21,7 +21,61 @@ final class CodexSwitchCoreTests: XCTestCase {
         XCTAssertEqual(result.0.profiles.count, 2)
         XCTAssertEqual(result.1.storageKind, .managed)
         XCTAssertTrue(SecureFileSystem.isPath(result.1.codexHomeURL, inside: root))
+        XCTAssertTrue(result.1.codexHomePath.contains("/p/"))
+        let legacySocketPath = root
+            .appendingPathComponent("Profiles", isDirectory: true)
+            .appendingPathComponent(result.1.id.uuidString, isDirectory: true)
+            .appendingPathComponent("codex-home/ipc/ipc.sock")
+        let compactSocketPath = result.1.codexHomeURL
+            .appendingPathComponent("ipc/ipc.sock")
+        XCTAssertLessThan(compactSocketPath.path.utf8.count, legacySocketPath.path.utf8.count)
         XCTAssertTrue(FileManager.default.fileExists(atPath: result.1.codexHomePath))
+    }
+
+    func testLegacyManagedProfileCompactsWithoutChangingProfileIdentity() throws {
+        let root = temporaryRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = ProfileStore(root: root)
+        let id = UUID()
+        let legacyRoot = store.legacyProfilesRoot.appendingPathComponent(id.uuidString, isDirectory: true)
+        let legacyHome = legacyRoot.appendingPathComponent("codex-home", isDirectory: true)
+        let legacyData = legacyRoot.appendingPathComponent("electron-data", isDirectory: true)
+        let legacyCache = legacyRoot.appendingPathComponent("electron-cache", isDirectory: true)
+        try SecureFileSystem.createDirectory(legacyHome)
+        try SecureFileSystem.createDirectory(legacyData)
+        try SecureFileSystem.createDirectory(legacyCache)
+        let canary = legacyHome.appendingPathComponent("canary")
+        try Data("preserved".utf8).write(to: canary)
+        let profile = CodexProfile(
+            id: id,
+            displayName: "Legacy",
+            codexHomePath: legacyHome.path,
+            electronDataPath: legacyData.path,
+            electronCachePath: legacyCache.path,
+            storageKind: .managed
+        )
+        try store.save(ProfileStoreDocument(
+            profiles: [profile],
+            activeProfileID: id,
+            lastCommittedProfileID: id
+        ))
+
+        let compacted = try store.compactManagedProfile(id)
+        let migrated = try XCTUnwrap(compacted.profiles.first(where: { $0.id == id }))
+        XCTAssertEqual(migrated.displayName, profile.displayName)
+        XCTAssertEqual(migrated.expectedIdentityHash, profile.expectedIdentityHash)
+        XCTAssertTrue(migrated.codexHomePath.contains("/p/"))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: legacyRoot.path))
+        XCTAssertEqual(
+            try String(contentsOf: migrated.codexHomeURL.appendingPathComponent("canary"), encoding: .utf8),
+            "preserved"
+        )
+
+        let repeated = try store.compactManagedProfile(id)
+        XCTAssertEqual(
+            repeated.profiles.first(where: { $0.id == id })?.codexHomePath,
+            migrated.codexHomePath
+        )
     }
 
     func testProfileRenamePreservesSecurityBoundariesAndPaths() throws {
@@ -106,8 +160,8 @@ final class CodexSwitchCoreTests: XCTestCase {
     }
 
     func testIdentityHasherNormalizesEmail() {
-        XCTAssertEqual(IdentityHasher.normalizeEmail("  USER@Example.COM "), "user@example.com")
-        XCTAssertEqual(IdentityHasher.hashEmail("USER@example.com"), IdentityHasher.hashEmail(" user@EXAMPLE.com "))
+        XCTAssertEqual(IdentityHasher.normalizeEmail("  synthetic-05@example.invalid "), "synthetic-03@example.invalid")
+        XCTAssertEqual(IdentityHasher.hashEmail("synthetic-06@example.invalid"), IdentityHasher.hashEmail(" synthetic-04@example.invalid "))
     }
 
     func testLiveWriterDetectorDetectsOpenConversation() throws {
@@ -147,12 +201,12 @@ final class CodexSwitchCoreTests: XCTestCase {
         let root = temporaryRoot()
         defer { try? FileManager.default.removeItem(at: root) }
         let journal = RecoveryJournal(url: root.appendingPathComponent("journal.json"))
-        let value = SwitchJournal(sourceProfileID: UUID(), targetProfileID: UUID(), phase: .failed, message: "user@example.com")
+        let value = SwitchJournal(sourceProfileID: UUID(), targetProfileID: UUID(), phase: .failed, message: "synthetic-03@example.invalid")
         try journal.save(value)
         let loaded = try journal.load()
         XCTAssertNil(loaded?.message)
         let persisted = try String(contentsOf: root.appendingPathComponent("journal.json"), encoding: .utf8)
-        XCTAssertFalse(persisted.contains("user@example.com"))
+        XCTAssertFalse(persisted.contains("synthetic-03@example.invalid"))
     }
 
     func testOperationLockSerializesConcurrentSwitches() throws {
@@ -261,7 +315,7 @@ final class CodexSwitchCoreTests: XCTestCase {
         let profileID = "B30412D1-8BBB-4B5D-9756-5EEC5523563E"
         let profileRoot = root.appendingPathComponent("Profiles/\(profileID)")
         let legacy = """
-        {"schemaVersion":1,"profiles":[{"id":"\(profileID)","displayName":"Personal","codexHomePath":"\(profileRoot.path)/codex-home","electronDataPath":"\(profileRoot.path)/electron-data","electronCachePath":"\(profileRoot.path)/electron-cache","storageKind":"managed","lastValidationMessage":"Verified user@example.com"}],"activeProfileID":"\(profileID)","lastCommittedProfileID":"\(profileID)"}
+        {"schemaVersion":1,"profiles":[{"id":"\(profileID)","displayName":"Personal","codexHomePath":"\(profileRoot.path)/codex-home","electronDataPath":"\(profileRoot.path)/electron-data","electronCachePath":"\(profileRoot.path)/electron-cache","storageKind":"managed","lastValidationMessage":"Verified synthetic-03@example.invalid"}],"activeProfileID":"\(profileID)","lastCommittedProfileID":"\(profileID)"}
         """
         try Data(legacy.utf8).write(to: root.appendingPathComponent("profiles.json"))
         let document = try ProfileStore(root: root).load()
@@ -269,7 +323,7 @@ final class CodexSwitchCoreTests: XCTestCase {
         XCTAssertNil(document.profiles.first?.lastValidatedAt)
         let migrated = try String(contentsOf: root.appendingPathComponent("profiles.json"), encoding: .utf8)
         XCTAssertFalse(migrated.contains("lastValidationMessage"))
-        XCTAssertFalse(migrated.contains("user@example.com"))
+        XCTAssertFalse(migrated.contains("synthetic-03@example.invalid"))
     }
 
     func testCompatibilitySchemaMigratesLegacyStatusesToVersionThree() throws {
@@ -366,7 +420,7 @@ final class CodexSwitchCoreTests: XCTestCase {
 
         let identity = try await coordinator.signIn(profile: profile)
         XCTAssertEqual(opened.value?.host, "chatgpt.com")
-        XCTAssertEqual(identity.identityHash, IdentityHasher.hashEmail("user@example.com"))
+        XCTAssertEqual(identity.identityHash, IdentityHasher.hashEmail("synthetic-03@example.invalid"))
         let methods = await fake.methods
         XCTAssertEqual(methods, ["account/login/start", "account/read", "stop"])
     }
@@ -482,7 +536,7 @@ final class CodexSwitchCoreTests: XCTestCase {
 
         let identityFake = FakeAppServerSession()
         var boundProfile = fixtureProfile()
-        boundProfile.expectedIdentityHash = IdentityHasher.hashEmail("different@example.com")
+        boundProfile.expectedIdentityHash = IdentityHasher.hashEmail("synthetic-01@example.invalid")
         let identityCoordinator = AuthenticationCoordinator(
             timeoutNanoseconds: 1_000_000_000,
             browserOpener: { _ in true },
@@ -579,7 +633,7 @@ final class CodexSwitchCoreTests: XCTestCase {
         )
 
         let identity = try await coordinator.signIn(profile: fixtureProfile())
-        XCTAssertEqual(identity.identityHash, IdentityHasher.hashEmail("user@example.com"))
+        XCTAssertEqual(identity.identityHash, IdentityHasher.hashEmail("synthetic-03@example.invalid"))
         let methods = await fake.methods
         XCTAssertEqual(methods.filter { $0 == "account/read" }.count, 3)
         XCTAssertEqual(methods.last, "stop")
@@ -597,7 +651,7 @@ final class CodexSwitchCoreTests: XCTestCase {
         )
 
         let identity = try await coordinator.signIn(profile: fixtureProfile())
-        XCTAssertEqual(identity.identityHash, IdentityHasher.hashEmail("user@example.com"))
+        XCTAssertEqual(identity.identityHash, IdentityHasher.hashEmail("synthetic-03@example.invalid"))
         let methods = await fake.methods
         XCTAssertEqual(methods.filter { $0 == "account/read" }.count, 2)
     }
@@ -605,7 +659,7 @@ final class CodexSwitchCoreTests: XCTestCase {
     func testAuthenticationCoordinatorDoesNotAcceptStaleBoundAccountWithoutEvent() async throws {
         let fake = FakeAppServerSession(events: nil)
         var profile = fixtureProfile()
-        profile.expectedIdentityHash = IdentityHasher.hashEmail("user@example.com")
+        profile.expectedIdentityHash = IdentityHasher.hashEmail("synthetic-03@example.invalid")
         let coordinator = AuthenticationCoordinator(
             timeoutNanoseconds: 2_000_000,
             reconciliationRetryNanoseconds: 1_000_000,
@@ -646,7 +700,7 @@ final class CodexSwitchCoreTests: XCTestCase {
     func testAuthenticationCoordinatorManualCheckCanRecoverPendingBoundLogin() async throws {
         let fake = FakeAppServerSession(events: nil, readFailuresBeforeSuccess: 1)
         let opened = LockedCount()
-        let expectedIdentityHash = IdentityHasher.hashEmail("user@example.com")
+        let expectedIdentityHash = IdentityHasher.hashEmail("synthetic-03@example.invalid")
         var profile = fixtureProfile()
         profile.expectedIdentityHash = expectedIdentityHash
         let boundProfile = profile
@@ -684,7 +738,7 @@ final class CodexSwitchCoreTests: XCTestCase {
             readFailuresBeforeSuccess: 100
         )
         var profile = fixtureProfile()
-        profile.expectedIdentityHash = IdentityHasher.hashEmail("user@example.com")
+        profile.expectedIdentityHash = IdentityHasher.hashEmail("synthetic-03@example.invalid")
         let coordinator = AuthenticationCoordinator(
             timeoutNanoseconds: 1_000_000_000,
             reconciliationTimeoutNanoseconds: 3_000_000,
@@ -1005,6 +1059,40 @@ final class CodexSwitchCoreTests: XCTestCase {
         XCTAssertEqual(try fixture.store.load().lastCommittedProfileID, fixture.target.id)
         XCTAssertTrue(try XCTUnwrap(process.snapshot).exposes(profile: fixture.target))
         XCTAssertNil(try RecoveryJournal(url: fixture.store.journalURL).load())
+    }
+
+    func testSwitchCompactsLegacyTargetAfterSourceQuit() async throws {
+        let fixture = try makeSwitchFixture()
+        defer { try? FileManager.default.removeItem(at: fixture.root) }
+
+        let compactTargetRoot = fixture.target.codexHomeURL.deletingLastPathComponent()
+        let legacyTargetRoot = fixture.store.legacyProfilesRoot
+            .appendingPathComponent(fixture.target.id.uuidString, isDirectory: true)
+        try SecureFileSystem.createDirectory(fixture.store.legacyProfilesRoot)
+        try FileManager.default.moveItem(at: compactTargetRoot, to: legacyTargetRoot)
+        var legacyTarget = fixture.target
+        legacyTarget.codexHomePath = legacyTargetRoot.appendingPathComponent("codex-home").path
+        legacyTarget.electronDataPath = legacyTargetRoot.appendingPathComponent("electron-data").path
+        legacyTarget.electronCachePath = legacyTargetRoot.appendingPathComponent("electron-cache").path
+        var document = try fixture.store.load()
+        let targetIndex = try XCTUnwrap(document.profiles.firstIndex(where: { $0.id == legacyTarget.id }))
+        document.profiles[targetIndex] = legacyTarget
+        try fixture.store.save(document)
+
+        let process = FakeChatGPTProcessController(snapshot: fixtureProcessSnapshot(profile: fixture.source))
+        let transaction = SwitchTransaction(
+            store: fixture.store,
+            processController: process,
+            verifier: FakeAccountVerifier(),
+            probe: FakeCompatibilityProbe(managedRoot: fixture.root)
+        )
+
+        let outcome = try await transaction.switchTo(fixture.target.id)
+        XCTAssertEqual(outcome, .committed)
+        let migrated = try XCTUnwrap(try fixture.store.load().profiles.first(where: { $0.id == fixture.target.id }))
+        XCTAssertEqual(migrated.codexHomePath, fixture.target.codexHomePath)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: legacyTargetRoot.path))
+        XCTAssertTrue(try XCTUnwrap(process.snapshot).exposes(profile: fixture.target))
     }
 
     func testGuidedDiagnosticsSucceedsWithProvisionalCompatibility() async throws {
@@ -1702,7 +1790,7 @@ private struct FakeAccountVerifier: AccountVerifying {
         guard let identityHash = profile.expectedIdentityHash else {
             throw ProfileError.identityUnverified
         }
-        return AccountIdentity(email: "fixture@example.invalid", identityHash: identityHash)
+        return AccountIdentity(email: "synthetic-02@example.invalid", identityHash: identityHash)
     }
 }
 
@@ -1714,7 +1802,7 @@ private struct CallbackAccountVerifier: AccountVerifying {
             throw ProfileError.identityUnverified
         }
         callback()
-        return AccountIdentity(email: "fixture@example.invalid", identityHash: identityHash)
+        return AccountIdentity(email: "synthetic-02@example.invalid", identityHash: identityHash)
     }
 }
 
@@ -1914,9 +2002,9 @@ private actor FakeAppServerSession: AppServerSessionProtocol {
         events: [AuthenticationEvent]? = [.loginCompleted(loginID: "fixture-login", success: true)],
         readFailuresBeforeSuccess: Int = 0,
         identity: AccountIdentity = AccountIdentity(
-            email: "user@example.com",
+            email: "synthetic-03@example.invalid",
             planType: "plus",
-            identityHash: IdentityHasher.hashEmail("user@example.com")
+            identityHash: IdentityHasher.hashEmail("synthetic-03@example.invalid")
         )
     ) {
         self.authURL = authURL

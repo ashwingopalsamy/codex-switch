@@ -228,7 +228,7 @@ private struct AppModelAccountVerifier: AccountVerifying {
         guard let identityHash = profile.expectedIdentityHash else {
             throw ProfileError.identityUnverified
         }
-        return AccountIdentity(email: "fixture@example.invalid", identityHash: identityHash)
+        return AccountIdentity(email: "synthetic-02@example.invalid", identityHash: identityHash)
     }
 }
 

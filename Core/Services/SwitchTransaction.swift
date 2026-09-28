@@ -117,7 +117,7 @@ public final class SwitchTransaction: @unchecked Sendable {
         let document = try store.load()
         guard let committedSourceID = document.lastCommittedProfileID ?? document.activeProfileID,
               let committedSource = document.profiles.first(where: { $0.id == committedSourceID }),
-              let target = document.profiles.first(where: { $0.id == targetID }) else {
+              var target = document.profiles.first(where: { $0.id == targetID }) else {
             throw ProfileError.missingProfile
         }
         let liveSnapshot = try processController.inspectSession()
@@ -226,6 +226,12 @@ public final class SwitchTransaction: @unchecked Sendable {
                     "ChatGPT closed, but its live Codex conversation did not release safely. The previous profile will be restored."
                 )
             }
+
+            let compactedDocument = try store.compactManagedProfile(target.id)
+            guard let compactedTarget = compactedDocument.profiles.first(where: { $0.id == target.id }) else {
+                throw ProfileError.missingProfile
+            }
+            target = compactedTarget
 
             transaction.phase = .launchingTarget
             SwitchLogger.switchStage("launching-target")
