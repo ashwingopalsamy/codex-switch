@@ -160,8 +160,8 @@ final class CodexSwitchCoreTests: XCTestCase {
     }
 
     func testIdentityHasherNormalizesEmail() {
-        XCTAssertEqual(IdentityHasher.normalizeEmail("  synthetic-05@example.invalid "), "synthetic-03@example.invalid")
-        XCTAssertEqual(IdentityHasher.hashEmail("synthetic-06@example.invalid"), IdentityHasher.hashEmail(" synthetic-04@example.invalid "))
+        XCTAssertEqual(IdentityHasher.normalizeEmail("  synthetic-03@example.invalid "), "synthetic-03@example.invalid")
+        XCTAssertEqual(IdentityHasher.hashEmail("synthetic-04@example.invalid"), IdentityHasher.hashEmail(" synthetic-04@example.invalid "))
     }
 
     func testLiveWriterDetectorDetectsOpenConversation() throws {
@@ -914,7 +914,13 @@ final class CodexSwitchCoreTests: XCTestCase {
 
     func testNativeSnapshotExcludesDetachedCrashReportersWhenChatGPTIsRunning() throws {
         let provider = DarwinProcessSnapshotProvider()
-        guard let snapshot = try provider.snapshot() else {
+        let processSnapshot: ChatGPTProcessSnapshot?
+        do {
+            processSnapshot = try provider.snapshot()
+        } catch ProfileError.appNotFound {
+            throw XCTSkip("ChatGPT is not installed in this environment")
+        }
+        guard let snapshot = processSnapshot else {
             throw XCTSkip("ChatGPT is not running in this environment")
         }
         XCTAssertFalse(snapshot.commandLines.contains { $0.contains("browser_crashpad_handler") })
